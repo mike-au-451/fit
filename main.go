@@ -119,3 +119,4 @@ func ReadFit(fh *os.File) error {
 
 	return nil
 }
+

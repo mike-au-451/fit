@@ -85,3 +85,52 @@ func Int(src []byte, arch int) int {
 	return val
 }
 
+/*
+Published by Garmin
+FIT_UINT16 FitCRC_Get16(FIT_UINT16 crc, FIT_UINT8 byte)
+{
+   static const FIT_UINT16 crc_table[16] =
+   {
+      0x0000, 0xCC01, 0xD801, 0x1400, 0xF001, 0x3C00, 0x2800, 0xE401,
+      0xA001, 0x6C00, 0x7800, 0xB401, 0x5000, 0x9C01, 0x8801, 0x4400
+   };
+   FIT_UINT16 tmp;
+
+   // compute checksum of lower four bits of byte
+   tmp = crc_table[crc & 0xF];
+   crc = (crc >> 4) & 0x0FFF;
+   crc = crc ^ tmp ^ crc_table[byte & 0xF];
+
+   // now compute checksum of upper four bits of byte
+   tmp = crc_table[crc & 0xF];
+   crc = (crc >> 4) & 0x0FFF;
+   crc = crc ^ tmp ^ crc_table[(byte >> 4) & 0xF];
+
+   return crc;
+}
+*/
+
+type FIT_UINT8 uint8
+type FIT_UINT16 uint16
+
+func FitCRC_Get16(crc FIT_UINT16, i8 FIT_UINT8) FIT_UINT16 {
+
+   crc_table := [16]FIT_UINT16 {
+      0x0000, 0xCC01, 0xD801, 0x1400, 0xF001, 0x3C00, 0x2800, 0xE401,
+      0xA001, 0x6C00, 0x7800, 0xB401, 0x5000, 0x9C01, 0x8801, 0x4400,
+   }
+
+   tmp := FIT_UINT16(0)
+
+   // compute checksum of lower four bits of byte
+   tmp = crc_table[crc & 0xF]
+   crc = (crc >> 4) & 0x0FFF
+   crc = crc ^ tmp ^ crc_table[i8 & 0xF]
+
+   // now compute checksum of upper four bits of byte
+   tmp = crc_table[crc & 0xF]
+   crc = (crc >> 4) & 0x0FFF
+   crc = crc ^ tmp ^ crc_table[(i8 >> 4) & 0xF]
+
+   return crc
+}
