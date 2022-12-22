@@ -35,6 +35,49 @@ type FieldDef struct {
 	defno, size, basetype int
 }
 
+var (
+	globalMessageNumbers, baseTypes map[int]string
+)
+
+func init() {
+	// from garmin xls
+	globalMessageNumbers = map[int]string{
+		0x00: "file_id",
+		0x08: "hr_zone",
+		0x09: "power_zone",
+		0x0c: "sport",
+		0x12: "session",
+		0x13: "lap",
+		0x14: "record",
+		0x15: "event",
+		0x17: "device_info",
+		0x1a: "workout",
+		0x22: "activity",
+		0xce: "field_description",
+		0xcf: "developer_data_id",
+
+		0xff00: "reserved - manufacturer specific message",
+		0xff01: "reserved - manufacturer specific message",
+		0xff04: "reserved - manufacturer specific message",
+	}
+
+	// from Garmin developer docs
+	baseTypes = map[int]string{
+		0x00: "enum",
+		0x01: "sint8",
+		0x02: "uint8",
+		0x07: "string",
+		0x0d: "byte",
+		// 0x11: "uint16z",
+		0x83: "sint16",
+		0x84: "uint16",
+		0x85: "sint32",
+		0x86: "uint32",
+		0x89: "float64",
+		0x8c: "uint32z",
+	}
+}
+
 func NewHeader() (FileHeader) {
 	// fmt.Printf(">>>NewHeader\n")
 	return FileHeader{}
@@ -67,6 +110,7 @@ func (hdr *FileHeader) ReadHeader(fh *os.File) (int, error) {
 		b2 [2]byte
 		b4 [4]byte
 
+		crc util.FIT_UINT16
 		err error
 	)
 
@@ -76,6 +120,7 @@ func (hdr *FileHeader) ReadHeader(fh *os.File) (int, error) {
 	}
 	at += nn
 	hdr.size = int(b1[0])
+	crc = util.FitCRC_Get16(crc, util.FIT_UINT8(b1[0]))
 
 	switch b1[0] {
 	case 12, 14:
@@ -89,6 +134,7 @@ func (hdr *FileHeader) ReadHeader(fh *os.File) (int, error) {
 	}
 	at += nn
 	hdr.protocolver = int(b1[0])
+	crc = util.FitCRC_Get16(crc, util.FIT_UINT8(b1[0]))
 
 	nn, err = io.ReadFull(fh, b2[:])
 	if err != nil {
@@ -96,6 +142,8 @@ func (hdr *FileHeader) ReadHeader(fh *os.File) (int, error) {
 	}
 	at += nn
 	hdr.profilever = int(b2[1]) << 8 + int(b2[0])
+	crc = util.FitCRC_Get16(crc, util.FIT_UINT8(b2[0]))
+	crc = util.FitCRC_Get16(crc, util.FIT_UINT8(b2[1]))
 
 	nn, err = io.ReadFull(fh, b4[:])
 	if err != nil {
@@ -103,6 +151,10 @@ func (hdr *FileHeader) ReadHeader(fh *os.File) (int, error) {
 	}
 	at += nn
 	hdr.DataSize = int(b4[3]) << 24 + int(b4[2]) << 16 + int(b4[1]) << 8 + int(b4[0])
+	crc = util.FitCRC_Get16(crc, util.FIT_UINT8(b4[0]))
+	crc = util.FitCRC_Get16(crc, util.FIT_UINT8(b4[1]))
+	crc = util.FitCRC_Get16(crc, util.FIT_UINT8(b4[2]))
+	crc = util.FitCRC_Get16(crc, util.FIT_UINT8(b4[3]))
 
 	nn, err = io.ReadFull(fh, b4[:])
 	if err != nil {
@@ -110,6 +162,10 @@ func (hdr *FileHeader) ReadHeader(fh *os.File) (int, error) {
 	}
 	at += nn
 	hdr.datatype = string(b4[:])
+	crc = util.FitCRC_Get16(crc, util.FIT_UINT8(b4[0]))
+	crc = util.FitCRC_Get16(crc, util.FIT_UINT8(b4[1]))
+	crc = util.FitCRC_Get16(crc, util.FIT_UINT8(b4[2]))
+	crc = util.FitCRC_Get16(crc, util.FIT_UINT8(b4[3]))
 
 	nn, err = io.ReadFull(fh, b2[:])
 	if err != nil {
@@ -117,6 +173,10 @@ func (hdr *FileHeader) ReadHeader(fh *os.File) (int, error) {
 	}
 	at += nn
 	hdr.crc = int(b2[1]) << 8 + int(b2[0])
+
+	if int(crc) != hdr.crc {
+		return at, erf.Errorf("bad crc: %x", crc)
+	}
 
 	return at, nil
 }
@@ -213,13 +273,12 @@ func (msg *DataMsg) ReadMsg(fh *os.File) (int, error) {
 			msg.data = append(msg.data, util.Int8(buf, msg.defn.architecture))
 		case 0x07:// string
 			msg.data = append(msg.data, string(buf))
-		case 0x83, 0x84:// sint16, uint16
+		case 0x83, 0x11, 0x84:// sint16, uint16z, uint16
 			msg.data = append(msg.data, util.Int16(buf, msg.defn.architecture))
-		case 0x85, 0x86:// sint32, uint32
+		case 0x85, 0x86, 0x8c:// sint32, uint32, uint32z
 			msg.data = append(msg.data, util.Int32(buf, msg.defn.architecture))
 		case 0x89:// float64
 			panic("unhandled float conversion")
-		case 0x8c:// uint32z
 		default:
 			panic(fmt.Sprintf("bug: mssing basetype: %d", fielddefs[ii].basetype))
 		}
@@ -261,46 +320,12 @@ func (msg *DefinitionMsg) Dump() {
 		0: "little endian",
 		1: "little endian",
 	}
-	// from garmin xls
-	gmns := map[int]string{
-		0x00: "file_id",
-		0x08: "hr_zone",
-		0x09: "power_zone",
-		0x0c: "sport",
-		0x12: "session",
-		0x13: "lap",
-		0x14: "record",
-		0x15: "event",
-		0x17: "device_info",
-		0x1a: "workout",
-		0x22: "activity",
-		0xce: "field_description",
-		0xcf: "developer_data_id",
-
-		0xff00: "reserved - manufacturer specific message",
-		0xff01: "reserved - manufacturer specific message",
-		0xff04: "reserved - manufacturer specific message",
-	}
-
-	bts := map[int]string{
-		0x00: "enum",
-		0x01: "sint8",
-		0x02: "uint8",
-		0x07: "string",
-		0x0d: "byte",
-		0x83: "sint16",
-		0x84: "uint16",
-		0x85: "sint32",
-		0x86: "uint32",
-		0x89: "float64",
-		0x8c: "uint32z",
-	}
 
 	fmt.Printf("DefinitionMsg @ %p\n", msg)
 	fmt.Printf("\theader: %d\n", msg.header)
 	fmt.Printf("\treserved: %d\n", msg.reserved)
 	fmt.Printf("\tarchitecture: %d (%s)\n", msg.architecture, archs[msg.architecture])
-	gmn, ok := gmns[msg.globalmsgno]
+	gmn, ok := globalMessageNumbers[msg.globalmsgno]
 	if !ok {
 		// panic(fmt.Sprintf("missing global message number: %d", msg.globalmsgno))
 		fmt.Printf("missing global message number: %d", msg.globalmsgno)
@@ -317,10 +342,10 @@ func (msg *DefinitionMsg) Dump() {
 
 	defns := []string{}
 	for ii := 0; ii < len(msg.FitDefns); ii++ {
-		defns = append(defns, fmt.Sprintf("{ %d, %d, %s }", msg.FitDefns[ii].defno, msg.FitDefns[ii].size, bts[msg.FitDefns[ii].basetype]))
+		defns = append(defns, fmt.Sprintf("{ %d, %d, %s }", msg.FitDefns[ii].defno, msg.FitDefns[ii].size, baseTypes[msg.FitDefns[ii].basetype]))
 	}
 	for ii := 0; ii < len(msg.DevDefns); ii++ {
-		defns = append(defns, fmt.Sprintf("{ %d, %d, %s }", msg.DevDefns[ii].defno, msg.DevDefns[ii].size, bts[msg.DevDefns[ii].basetype]))
+		defns = append(defns, fmt.Sprintf("{ %d, %d, %s }", msg.DevDefns[ii].defno, msg.DevDefns[ii].size, baseTypes[msg.DevDefns[ii].basetype]))
 	}
 	fmt.Printf("\tFieldDefs: %s\n", strings.Join(defns, " "))
 }
@@ -330,21 +355,8 @@ func (msg *DataMsg) Dump() {
 }
 
 func (fd *FieldDef) Dump() {
-	bts := map[int]string{
-		0x00: "enum",
-		0x01: "sint8",
-		0x02: "uint8",
-		0x07: "string",
-		0x0d: "byte",
-		0x83: "sint16",
-		0x84: "uint16",
-		0x85: "sint32",
-		0x86: "uint32",
-		0x89: "float64",
-		0x8c: "uint32z",
-	}
 	fmt.Printf("FieldDef @ %p\n", fd)
-	bt, ok := bts[fd.basetype]
+	bt, ok := baseTypes[fd.basetype]
 	if !ok {
 		panic(fmt.Sprintf("missing bt: %x", fd.basetype))
 	}
