@@ -1,4 +1,5 @@
 # Garmin SDK
 FitSDKRelease_21.94.00*
 
+bin/
 testfiles/*fit
