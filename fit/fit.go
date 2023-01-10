@@ -273,7 +273,7 @@ func (msg *DataMsg) ReadMsg(fh *os.File) (int, error) {
 			msg.data = append(msg.data, util.Int8(buf, msg.defn.architecture))
 		case 0x07:// string
 			msg.data = append(msg.data, string(buf))
-		case 0x83, 0x11, 0x84:// sint16, uint16z, uint16
+		case 0x11, 0x83, 0x84:// uint16z, sint16, uint16
 			msg.data = append(msg.data, util.Int16(buf, msg.defn.architecture))
 		case 0x85, 0x86, 0x8c:// sint32, uint32, uint32z
 			msg.data = append(msg.data, util.Int32(buf, msg.defn.architecture))
